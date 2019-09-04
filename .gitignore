@@ -1,0 +1,13 @@
+localsnapshots-db/
+localsnapshots-db.tar/
+spent-addresses-db*
+mainnet.snapshot.meta
+mainnet.snapshot.state
+ls.gz.tar
+localsnapshots-db.tar
+.idea/
+ls.tar
+iri-ls-sa-merger
+export.gz.bin
+merged-spent-addresses-db
+*.txt
