@@ -24,6 +24,15 @@ const blockRestartInterval = 16
 const blockCacheSize = 1000 * 1024
 const cacheNumShardBits = 2
 
+var localSnapshotDBKey = func(num int32) []byte {
+	intAsByte := make([]byte, 4);
+	for i := 3; i >= 0; i-- {
+		intAsByte[i] = (byte)(num & 0xFF)
+		num >>= 8
+	}
+	return intAsByte
+}(1)
+
 var spentAddrVal = []byte{}
 
 // merge local snapshot and spent addresses db
@@ -231,7 +240,6 @@ func printExportFileInfo() {
 	}
 
 	fmt.Printf("contains %d spent addresses\n", len(spentAddrs))
-
 }
 
 func generateExportFile() {
@@ -254,11 +262,8 @@ func generateExportFile() {
 		return
 	}
 
-	lsMsHash, err := trinary.BytesToTrytes(lsIt.Key().Data())
-	must(err)
-	fmt.Printf("persisted local snapshot is %d MBs in size\n", len(lsIt.Value().Data())/1024/2024)
+	fmt.Printf("persisted local snapshot is %d KBs in size\n", len(lsIt.Value().Data())/1024)
 	ls := readLocalSnapshotFromBytes(lsIt.Value().Data())
-	ls.msHash = lsMsHash[:81]
 	defer lsIt.Key().Free()
 	defer lsIt.Value().Free()
 
@@ -280,7 +285,9 @@ func generateExportFile() {
 
 	fmt.Println("writing in-memory binary buffer")
 	var buf bytes.Buffer
-	buf.Write(lsIt.Key().Data())
+	msHashBytes, err := trinary.TrytesToBytes(ls.msHash)
+	must(err)
+	must(binary.Write(&buf, binary.BigEndian, msHashBytes))
 	must(binary.Write(&buf, binary.BigEndian, ls.msIndex))
 	must(binary.Write(&buf, binary.BigEndian, ls.msTimestamp))
 	must(binary.Write(&buf, binary.BigEndian, int32(len(ls.solidEntryPoints))))
@@ -310,7 +317,7 @@ func generateExportFile() {
 		must(binary.Write(&buf, binary.BigEndian, v))
 	}
 
-	fmt.Printf("wrote in-memory binary buffer (%d MBs)\n", buf.Len()/1024/2024)
+	fmt.Printf("wrote in-memory binary buffer (%d KBs)\n", buf.Len()/1024)
 	fmt.Printf("writing gzipped stream to file %s\n", *expFileName)
 	os.Remove(*expFileName)
 	exportFile, err := os.OpenFile(*expFileName, os.O_WRONLY|os.O_CREATE, 0660)
@@ -414,7 +421,7 @@ func printLocalSnapshotFilesInfo(ls *localsnapshot) {
 		total += int64(val)
 	}
 	fmt.Printf("max supply correct: %v\n", total == 2779530283277761)
-	fmt.Printf("size: %d (KBs)\n", ls.SizeInBytes() / 1024)
+	fmt.Printf("size: %d (KBs)\n", ls.SizeInBytes()/1024)
 }
 
 func readLocalSnapshotFromBytes(rawLS []byte) *localsnapshot {
@@ -423,14 +430,23 @@ func readLocalSnapshotFromBytes(rawLS []byte) *localsnapshot {
 		seenMilestones:   make(map[string]int32),
 		ledgerState:      make(map[string]uint64),
 	}
+
+	hashBuf := make([]byte, 49)
 	var solidEntryPointsCount, seenMilestonesCount int32
 	buf := bytes.NewBuffer(rawLS)
+
+	// read milestone hash
+	must(binary.Read(buf, binary.BigEndian, hashBuf))
+	hash, err := trinary.BytesToTrytes(hashBuf)
+	must(err)
+	ls.msHash = hash[:81]
+
+	// nums
 	must(binary.Read(buf, binary.BigEndian, &ls.msIndex))
 	must(binary.Read(buf, binary.BigEndian, &ls.msTimestamp))
 	must(binary.Read(buf, binary.BigEndian, &solidEntryPointsCount))
 	must(binary.Read(buf, binary.BigEndian, &seenMilestonesCount))
 
-	hashBuf := make([]byte, 49)
 	for i := 0; i < int(solidEntryPointsCount); i++ {
 		var val int32
 		must(binary.Read(buf, binary.BigEndian, hashBuf))
@@ -552,10 +568,8 @@ func generateLocalSnapshotsDB(in chan []byte) {
 	ls := readLocalSnapshotFromFiles()
 	printLocalSnapshotFilesInfo(ls)
 
-	// generate key
-	addrBytes, err := trinary.TrytesToBytes(ls.msHash)
-	must(err)
-	must(db.PutCF(wo, cfs[2], addrBytes, ls.Bytes()))
+	// persist local snapshot
+	must(db.PutCF(wo, cfs[2], localSnapshotDBKey, ls.Bytes()))
 
 	fmt.Printf("finished, took %v\n", time.Now().Sub(s))
 }
