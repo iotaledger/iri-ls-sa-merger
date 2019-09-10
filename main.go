@@ -370,11 +370,14 @@ type localsnapshot struct {
 }
 
 func (ls *localsnapshot) SizeInBytes() int {
-	return 20 + (len(ls.solidEntryPoints) * (49 + 4)) + (len(ls.seenMilestones) * (49 + 4)) + (len(ls.ledgerState) * (49 + 8))
+	return 49 + 20 + (len(ls.solidEntryPoints) * (49 + 4)) + (len(ls.seenMilestones) * (49 + 4)) + (len(ls.ledgerState) * (49 + 8))
 }
 
 func (ls *localsnapshot) Bytes() []byte {
 	buf := bytes.NewBuffer(make([]byte, 0, ls.SizeInBytes()))
+	msHashBytes, err := trinary.TrytesToBytes(ls.msHash)
+	must(err)
+	must(binary.Write(buf, binary.BigEndian, msHashBytes))
 	must(binary.Write(buf, binary.BigEndian, ls.msIndex))
 	must(binary.Write(buf, binary.BigEndian, ls.msTimestamp))
 	must(binary.Write(buf, binary.BigEndian, int32(len(ls.solidEntryPoints))))
@@ -410,10 +413,8 @@ func printLocalSnapshotFilesInfo(ls *localsnapshot) {
 	for _, val := range ls.ledgerState {
 		total += int64(val)
 	}
-	sizeInBytes := ls.SizeInBytes()
-	actualSizeInBytes := len(ls.Bytes())
 	fmt.Printf("max supply correct: %v\n", total == 2779530283277761)
-	fmt.Printf("bytes size correct: %v (%d = %d (MBs))\n", sizeInBytes == actualSizeInBytes, sizeInBytes/1024/2024, actualSizeInBytes/1024/2024)
+	fmt.Printf("size: %d (KBs)\n", ls.SizeInBytes() / 1024)
 }
 
 func readLocalSnapshotFromBytes(rawLS []byte) *localsnapshot {
