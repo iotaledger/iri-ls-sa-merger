@@ -8,14 +8,16 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	"github.com/iotaledger/iota.go/trinary"
-	"github.com/tecbot/gorocksdb"
 	"io"
 	"os"
 	"path"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/iotaledger/iota.go/trinary"
+	cuckoo "github.com/seiflotfy/cuckoofilter"
+	"github.com/tecbot/gorocksdb"
 )
 
 const bloomFilterBitsPerKey = 10
@@ -25,7 +27,7 @@ const blockCacheSize = 1000 * 1024
 const cacheNumShardBits = 2
 
 var localSnapshotDBKey = func(num int32) []byte {
-	intAsByte := make([]byte, 4);
+	intAsByte := make([]byte, 4)
 	for i := 3; i >= 0; i-- {
 		intAsByte[i] = (byte)(num & 0xFF)
 		num >>= 8
@@ -42,9 +44,12 @@ var lsStateFileName = flag.String("ls-state-file", "./mainnet.snapshot.state", "
 var lsMetaFileName = flag.String("ls-meta-file", "./mainnet.snapshot.meta", "the name of the file containing the local snapshot meta data")
 
 // export
+const expFileVersion byte = 2
+
 var genExpFile = flag.Bool("export-db", false, "if enabled, exports all data from a local snapshot/spent-addresses database into single gzip compressed file")
 var expFileName = flag.String("export-db-file", "export.gz.bin", "the name of the gzip compressed file containing the exported database data")
 var printExpDbFileInfo = flag.Bool("export-db-file-info", false, "if enabled, simply prints the specified export file info to the console")
+var spentAddrCuckooFilterCapacity = flag.Int("cuckoo-filter-capacity", 50000000, "the capacity of the cuckoo filter 'containing' the spent addresses")
 
 // merge spent addresses sources
 var mergeSpentAddr = flag.Bool("merge-spent-addresses", false, "if enabled, merges multiple source spent-addresses-db databases into one")
@@ -181,6 +186,13 @@ func printExportFileInfo() {
 	must(err)
 	bufReader := bufio.NewReader(gzipReader)
 
+	var fileVersion byte
+	must(binary.Read(bufReader, binary.BigEndian, &fileVersion))
+
+	if fileVersion != expFileVersion {
+		panic(fmt.Sprintf("file version %d is not supported, only version %d", fileVersion, expFileVersion))
+	}
+
 	hashBuf := make([]byte, 49)
 	_, err = bufReader.Read(hashBuf)
 	must(err)
@@ -210,6 +222,7 @@ func printExportFileInfo() {
 		must(err)
 		ls.solidEntryPoints[hash[:81]] = val
 	}
+
 	for i := 0; i < int(seenMilestonesCount); i++ {
 		var val int32
 		must(binary.Read(bufReader, binary.BigEndian, hashBuf))
@@ -228,18 +241,24 @@ func printExportFileInfo() {
 		ls.ledgerState[hash[:81]] = val
 	}
 
+	var cuckooFilterSize int32
+	must(binary.Read(bufReader, binary.BigEndian, &cuckooFilterSize))
+
+	fmt.Println("file version:", fileVersion)
 	fmt.Println("read following local snapshot from the exported database file:")
 	printLocalSnapshotFilesInfo(ls)
+	fmt.Printf("spent addresses cuckoo filter size: %d KBs\n", cuckooFilterSize/1024)
 
-	spentAddrs := [][]byte{}
-	for i := 0; i < int(spentAddrsCount); i++ {
-		spentAddrBuf := make([]byte, 49)
-		must(binary.Read(bufReader, binary.BigEndian, hashBuf))
-		copy(spentAddrBuf, hashBuf)
-		spentAddrs = append(spentAddrs, spentAddrBuf)
+	cuckooFilterData := make([]byte, cuckooFilterSize)
+	must(binary.Read(bufReader, binary.BigEndian, &cuckooFilterData))
+	cuckooFilter, err := cuckoo.Decode(cuckooFilterData)
+	if err != nil {
+		panic("couldn't reconstruct the cuckoo filter from the data within the snapshot file")
 	}
-
-	fmt.Printf("contains %d spent addresses\n", len(spentAddrs))
+	if int32(cuckooFilter.Count()) != spentAddrsCount {
+		panic(fmt.Sprintf("spent addresses count between the cuckoo filter (%d) and the header (%d) doesn't match", cuckooFilter.Count(), spentAddrsCount))
+	}
+	fmt.Printf("contains %d spent addresses in the cuckoo filter\n", spentAddrsCount)
 }
 
 func generateExportFile() {
@@ -283,10 +302,16 @@ func generateExportFile() {
 	}
 	fmt.Printf("read %d spent addresses\n", len(spentAddrs))
 
+	if len(spentAddrs) > *spentAddrCuckooFilterCapacity {
+		panic(fmt.Sprintf("the capacity of the cuckoo filter is too low to contain the spent addresses: "+
+			"spent addresses %d vs. CF capacity %d", len(spentAddrs), *spentAddrCuckooFilterCapacity))
+	}
+
 	fmt.Println("writing in-memory binary buffer")
 	var buf bytes.Buffer
 	msHashBytes, err := trinary.TrytesToBytes(ls.msHash)
 	must(err)
+	must(binary.Write(&buf, binary.BigEndian, expFileVersion))
 	must(binary.Write(&buf, binary.BigEndian, msHashBytes))
 	must(binary.Write(&buf, binary.BigEndian, ls.msIndex))
 	must(binary.Write(&buf, binary.BigEndian, ls.msTimestamp))
@@ -313,9 +338,22 @@ func generateExportFile() {
 		must(binary.Write(&buf, binary.BigEndian, raw))
 		must(binary.Write(&buf, binary.BigEndian, v))
 	}
-	for _, v := range spentAddrs {
-		must(binary.Write(&buf, binary.BigEndian, v))
+
+	cuckooFilter := cuckoo.NewFilter(uint(*spentAddrCuckooFilterCapacity))
+	var failedToInsert int
+	for i, v := range spentAddrs {
+		if inserted := cuckooFilter.Insert(v); !inserted {
+			failedToInsert++
+		}
+		fmt.Printf("populating cuckoo filter: %d/%d (failed to insert: %d)\t\r", i+1, len(spentAddrs), failedToInsert)
 	}
+	fmt.Println()
+
+	serializedCuckooFilter := cuckooFilter.Encode()
+	// write the size of the cuckoo filter into the file for easier retrieval
+	must(binary.Write(&buf, binary.BigEndian, int32(len(serializedCuckooFilter))))
+	fmt.Printf("spent addresses cuckoo filter size: %d KBs\n", len(serializedCuckooFilter)/1024)
+	must(binary.Write(&buf, binary.BigEndian, serializedCuckooFilter))
 
 	fmt.Printf("wrote in-memory binary buffer (%d KBs)\n", buf.Len()/1024)
 	fmt.Printf("writing gzipped stream to file %s\n", *expFileName)
