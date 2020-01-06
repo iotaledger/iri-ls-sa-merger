@@ -87,55 +87,129 @@ yields per default a `merged-spent-addresses-db` containing the spent addresses 
 
 Using `./iri-ls-sa-merger -export-db` yields a gzip compressed binary `export.gz.bin` file containing the local snapshot,
 ledger state and spent-addresses out of a `localsnapshots-db`. This can be useful for other applications which are reliant on having
-the given data in a simple format.
-``` 
-$ ./iri-ls-sa-merger -export-db
-[export database mode]
-persisted local snapshot is 10 MBs in size
-read following local snapshot from the database:
-ms index/hash/timestamp: 1163676/OX9DIVLRPFNSICOGRTKETSSPXZTTABPZMGS9WXGCLEJOURTFBXPJYMBDGDOZIOCFKHBMJGAHSGLMZ9999/1567592924
-solid entry points: 49
-seen milestones: 101
-ledger entries: 383761
-max supply correct: true
-bytes size correct: true (10 = 10 (MBs))
-reading in spent addresses...
-read 10823853 spent addresses
-writing in-memory binary buffer
-wrote in-memory binary buffer (266 MBs)
-writing gzipped stream to file export.gz.bin
-finished, took 18.609205668s
-```
+the given data in a simple format. You must use different version of the program to read/write different export file versions.
 
-File format (decompressed):
-```
-milestoneHash -> 49 bytes
-milestoneIndex -> int32
-snapshotTimestamp -> int64
-amountOfSolidEntryPoints -> int32
-amountOfSeenMilestones -> int32
-amountOfBalances -> int32
-amountOfSpentAddresses -> int32
-amountOfSolidEntryPoints * solidEntryPointHash:index -> 49 bytes + int32
-amountOfSeenMilestones * seenMilestoneHash:index -> 49 bytes + int32
-amountOfBalances * balance:value -> 49 bytes + int64
-amountOfSpentAddresses * spentAddress -> 49 bytes
-```
+<details>
+  <summary>File format v1</summary>
+  
+  File format (decompressed):
+  ```
+  milestoneHash -> 49 bytes
+  milestoneIndex -> int32
+  snapshotTimestamp -> int64
+  amountOfSolidEntryPoints -> int32
+  amountOfSeenMilestones -> int32
+  amountOfBalances -> int32
+  amountOfSpentAddresses -> int32
+  amountOfSolidEntryPoints * solidEntryPointHash:index -> 49 bytes + int32
+  amountOfSeenMilestones * seenMilestoneHash:index -> 49 bytes + int32
+  amountOfBalances * balance:value -> 49 bytes + int64
+  amountOfSpentAddresses * spentAddress -> 49 bytes
+  ```    
+  
+  ``` 
+  $ ./iri-ls-sa-merger -export-db
+  [export database mode]
+  persisted local snapshot is 10 MBs in size
+  read following local snapshot from the database:
+  ms index/hash/timestamp: 1163676/OX9DIVLRPFNSICOGRTKETSSPXZTTABPZMGS9WXGCLEJOURTFBXPJYMBDGDOZIOCFKHBMJGAHSGLMZ9999/1567592924
+  solid entry points: 49
+  seen milestones: 101
+  ledger entries: 383761
+  max supply correct: true
+  bytes size correct: true (10 = 10 (MBs))
+  reading in spent addresses...
+  read 10823853 spent addresses
+  writing in-memory binary buffer
+  wrote in-memory binary buffer (266 MBs)
+  writing gzipped stream to file export.gz.bin
+  finished, took 18.609205668s
+  ```
+  
+</details>
+
+<details>
+  <summary>File format v2</summary>
+  
+  File format (decompressed):
+  ```
+  versionByte -> 1 byte
+  milestoneHash -> 49 bytes
+  milestoneIndex -> int32
+  snapshotTimestamp -> int64
+  amountOfSolidEntryPoints -> int32
+  amountOfSeenMilestones -> int32
+  amountOfBalances -> int32
+  amountOfSpentAddresses -> int32
+  amountOfSolidEntryPoints * solidEntryPointHash:index -> 49 bytes + int32
+  amountOfSeenMilestones * seenMilestoneHash:index -> 49 bytes + int32
+  amountOfBalances * balance:value -> 49 bytes + int64
+  cuckooFilterSize -> 4 bytes
+  cukooFilterData -> N bytes annotated by cuckooFilterSize 
+  ```
+  
+  ```
+  $ ./iri-ls-sa-merger -export-db
+  [generate export file from database mode]
+  persisted local snapshot is 22679 KBs in size
+  read following local snapshot from the database:
+  ms index/hash/timestamp: 1290028/MQRQLZZYMQNXEDRCULPBHYRJKVHLUV9PXBFFVIPHNPJYGDYBMXHVOEJPYZDVRTBQUUBTYBXDRUAY99999/1577351965
+  solid entry points: 58
+  seen milestones: 101
+  ledger entries: 407290
+  max supply correct: true
+  size: 22679 (KBs)
+  reading in spent addresses...
+  read 12927520 spent addresses
+  writing in-memory binary buffer
+  populating cuckoo filter: 12927520/12927520 (failed to insert: 0)
+  spent addresses cuckoo filter size: 65536 KBs
+  wrote in-memory binary buffer (88215 KBs)
+  writing gzipped stream to file export.gz.bin
+  finished, took 2m26.3401733s
+  ```
+  
+</details>
+
 Note that there are **no** delimiters between the values (there's no `:`), so use the above byte size notation to simply parse
 the values accordingly. You can use the verification method's source code to understand on how to write a function
 reading in such file.
 
 #### Print export file infos
 Using `./iri-ls-sa-merger -export-db-file-info` yields information about the export file:
-```
-$ ./iri-ls-sa-merger -export-db-file-info
-[verify exported database file mode]
-read following local snapshot from the exported database file:
-ms index/hash/timestamp: 1567592924/OX9DIVLRPFNSICOGRTKETSSPXZTTABPZMGS9WXGCLEJOURTFBXPJYMBDGDOZIOCFKHBMJGAHSGLMZ9999/4997950363140096
-solid entry points: 49
-seen milestones: 101
-ledger entries: 383761
-max supply correct: true
-bytes size correct: true (10 = 10 (MBs))
-contains 10823853 spent addresses
-```
+
+<details>
+  <summary>File format v1</summary>
+  
+  ```
+  $ ./iri-ls-sa-merger -export-db-file-info
+  [verify exported database file mode]
+  read following local snapshot from the exported database file:
+  ms index/hash/timestamp: 1567592924/OX9DIVLRPFNSICOGRTKETSSPXZTTABPZMGS9WXGCLEJOURTFBXPJYMBDGDOZIOCFKHBMJGAHSGLMZ9999/4997950363140096
+  solid entry points: 49
+  seen milestones: 101
+  ledger entries: 383761
+  max supply correct: true
+  bytes size correct: true (10 = 10 (MBs))
+  contains 10823853 spent addresses
+  ```
+</details>
+
+<details>
+  <summary>File format v2</summary>
+  
+  ```
+  $./iri-ls-sa-merger -export-db-file-info
+  [print export file info mode]
+  file version: 2
+  read following local snapshot from the exported database file:
+  ms index/hash/timestamp: 1290028/MQRQLZZYMQNXEDRCULPBHYRJKVHLUV9PXBFFVIPHNPJYGDYBMXHVOEJPYZDVRTBQUUBTYBXDRUAY99999/1577351965
+  solid entry points: 58
+  seen milestones: 101
+  ledger entries: 407290
+  max supply correct: true
+  size: 22679 (KBs)
+  spent addresses cuckoo filter size: 65536 KBs
+  contains 12927520 spent addresses in the cuckoo filter
+  ```
+</details>
