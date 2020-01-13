@@ -1,4 +1,4 @@
-module github.com/luca-moser/iri-ls-sa-merger
+module github.com/iotaledger/iri-ls-sa-merger
 
 go 1.12
 
