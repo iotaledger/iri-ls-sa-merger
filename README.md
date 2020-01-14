@@ -14,7 +14,7 @@ Prerequisites: This tool was only tested under Ubuntu 19.04 (shoul also work und
 
 1. Git clone the [RocksDB repository](https://github.com/facebook/rocksdb)
 2. Go into the newly cloned directory and checkout branch `5.17.fb`
-3. Install needed dependencies: `sudo apt-get install libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev`
+3. Install needed dependencies: `sudo apt-get install libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev liblz4-dev`
 4. Compile the RocksDB shared libs and install them at the appropriate location via: `make shared_lib && make install-shared`
 5. `export LD_LIBRARY_PATH=/usr/local/lib`
 6. Git clone **this** repository into another directory
