@@ -1,3 +1,4 @@
+
 FROM ubuntu:19.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -24,12 +25,13 @@ ENV LD_LIBRARY_PATH=/usr/local/lib
 ENV CGO_CFLAGS="-I/usr/local/include/rocksdb"
 ENV CGO_LDFLAGS="-L/usr/local/lib -lrocksdb -lstdc++ -lm -lz -lbz2 -lsnappy -llz4 -lzstd"
 
+COPY . .
+
 RUN go get github.com/tecbot/gorocksdb
-RUN go install
+RUN go install .
 
 ENV $PATH=$PATH:/go/bin
 
 WORKDIR /data
 
 ENTRYPOINT [ "iri-ls-sa-merger" ]
-
