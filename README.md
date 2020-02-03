@@ -5,6 +5,7 @@
 | [Combine a `spent-address-db` and local snapshot meta/state files into one `localsnapshots-db` database](#generating-a-localsnapshots-db-from-local-snapshot-files-and-a-spent-addresses-db)|
 | [Merge multiple `spent-address-db`s and `previousEpochsSpentAddresses.txt`s into one database](#merging-multiple-spent-addresses-sources)|
 | [Generate an export file `export.gz.bin` containing the local snapshot, ledger state and spent-addresses data from a `localsnapshots-db`](#generating-an-export-file-from-a-localsnapshots-db) |
+| [Generate a spent-addresses export file `spent_addresses.bin`](#generating-a-spent-addresses-export-file-from-a-localsnapshots-db)|
 | [Print out infos about a local snapshot given the meta and state files](#print-local-snapshot-infos)|
 | [Print out infos about an export file](#print-export-file-infos)|
 
@@ -223,6 +224,30 @@ the given data in a simple format. You must use different version of the program
 Note that there are **no** delimiters between the values (there's no `:`), so use the above byte size notation to simply parse
 the values accordingly. You can use the verification method's source code to understand on how to write a function
 reading in such file.
+
+### Generating a spent-addresses export file from a localsnapshots-db
+
+Using `./iri-ls-sa-merger export-spent-addr` yields a binary `spent_addresses.bin` file containing the spent-addresses 
+out of a `localsnapshots-db`.
+
+```
+$ ./iri-ls-sa-merger -export-spent-addr
+>> IRI Localsnapshot & SpentAddresses Merger & Exporter v3 <<
+[generate spent-addresses export file from database mode]
+reading in spent addresses...
+read 13044956 spent addresses
+writing spent addresses...
+finished, took 26.0207192s
+```
+
+<details>
+  <summary>File format</summary>
+  
+  ```
+  spentAddressesCount -> 4 bytes (int32)
+  spentAddress -> 49 bytes * spentAddressesCount
+  ```
+</details>
 
 #### Print export file infos
 Using `./iri-ls-sa-merger -export-db-file-info` yields information about the export file:

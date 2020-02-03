@@ -47,10 +47,14 @@ var lsMetaFileName = flag.String("ls-meta-file", "./mainnet.snapshot.meta", "the
 // export
 const expFileVersion byte = 3
 
-var genExpFile = flag.Bool("export-db", false, "if enabled, exports all data from a local snapshot/spent-addresses database into single gzip compressed file")
+var genLSAddrExpFile = flag.Bool("export-db", false, "if enabled, exports all data from a local-snapshot/spent-addresses database into single gzip compressed file")
 var expFileName = flag.String("export-db-file", "export.gz.bin", "the name of the gzip compressed file containing the exported database data")
 var printExpDbFileInfo = flag.Bool("export-db-file-info", false, "if enabled, simply prints the specified export file info to the console")
 var spentAddrCuckooFilterCapacity = flag.Int("cuckoo-filter-capacity", 50000000, "the capacity of the cuckoo filter 'containing' the spent addresses")
+
+// export spent address
+var genAddrExpFile = flag.Bool("export-spent-addr", false, "if enabled, exports all spent addresses from a local-snapshot/spent-addresses database database into single gzip compressed file")
+var addrExpFileName = flag.String("export-spent-addr-file", "spent_addresses.bin", "the name of the file containing the exported spent addresses")
 
 // merge spent addresses sources
 var mergeSpentAddr = flag.Bool("merge-spent-addresses", false, "if enabled, merges multiple source spent-addresses-db databases into one")
@@ -84,9 +88,15 @@ func main() {
 		return
 	}
 
-	if *genExpFile {
-		fmt.Println("[generate export file from database mode]")
+	if *genLSAddrExpFile {
+		fmt.Println("[generate local-snapshot+spent-addresses export file from database mode]")
 		generateExportFile()
+		return
+	}
+
+	if *genAddrExpFile {
+		fmt.Println("[generate spent-addresses export file from database mode]")
+		generateSpentAddressesExportFile()
 		return
 	}
 
@@ -299,6 +309,45 @@ func printExportFileInfo() {
 	fmt.Printf("data integrity check successful (sha256): %x\n", computedHash)
 }
 
+func generateSpentAddressesExportFile() {
+	s := time.Now()
+
+	cfOpt := gorocksdb.NewDefaultOptions()
+	cfOpts := []*gorocksdb.Options{cfOpt, cfOpt, cfOpt}
+
+	db, cfs, err := gorocksdb.OpenDbColumnFamilies(defaultOpts(), *localSnapshotsDBTarget, []string{"default", "spent-addresses", "localsnapshots"}, cfOpts)
+	must(err)
+	defer db.Close()
+	ro := gorocksdb.NewDefaultReadOptions()
+
+	fmt.Println("reading in spent addresses...")
+	spentAddrs := make([][]byte, 0)
+	saIt := db.NewIteratorCF(ro, cfs[1])
+	saIt.SeekToFirst()
+	for saIt = saIt; saIt.Valid(); saIt.Next() {
+		keyCopy := make([]byte, len(saIt.Key().Data()))
+		copy(keyCopy, saIt.Key().Data())
+		spentAddrs = append(spentAddrs, keyCopy)
+		saIt.Key().Free()
+		saIt.Value().Free()
+	}
+	fmt.Printf("read %d spent addresses\n", len(spentAddrs))
+
+	fmt.Println("writing spent addresses...")
+	exportFile, err := os.OpenFile(*addrExpFileName, os.O_WRONLY|os.O_CREATE, 0660)
+	must(err)
+
+	must(binary.Write(exportFile, binary.LittleEndian, int32(len(spentAddrs))))
+	for _, v := range spentAddrs {
+		_, err := exportFile.Write(v)
+		must(err)
+	}
+
+	must(exportFile.Close())
+
+	fmt.Printf("finished, took %v\n", time.Now().Sub(s))
+}
+
 func generateExportFile() {
 	s := time.Now()
 
@@ -413,11 +462,6 @@ func generateExportFile() {
 
 	fmt.Printf("sha256: %x\n", sha256Hash)
 	fmt.Printf("finished, took %v\n", time.Now().Sub(s))
-}
-
-type addrpair struct {
-	k []byte
-	v []byte
 }
 
 func defaultOpts() *gorocksdb.Options {
