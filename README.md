@@ -4,7 +4,7 @@
 |:----|
 | [Combine a `spent-address-db` and local snapshot meta/state files into one `localsnapshots-db` database](#generating-a-localsnapshots-db-from-local-snapshot-files-and-a-spent-addresses-db)|
 | [Merge multiple `spent-address-db`s and `previousEpochsSpentAddresses.txt`s into one database](#merging-multiple-spent-addresses-sources)|
-| [Generate an export file `export.gz.bin` containing the local snapshot, ledger state and spent-addresses data from a `localsnapshots-db`](#generating-an-export-file-from-a-localsnapshots-db) |
+| [Generate an export file `export.bin` containing the local snapshot, ledger state and spent-addresses data from a `localsnapshots-db`](#generating-an-export-file-from-a-localsnapshots-db) |
 | [Generate a spent-addresses export file `spent_addresses.bin`](#generating-a-spent-addresses-export-file-from-a-localsnapshots-db)|
 | [Print out infos about a local snapshot given the meta and state files](#print-local-snapshot-infos)|
 | [Print out infos about an export file](#print-export-file-infos)|
