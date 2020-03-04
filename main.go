@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"crypto/sha256"
 	"encoding/binary"
 	"flag"
@@ -17,7 +16,6 @@ import (
 	"time"
 
 	"github.com/iotaledger/iota.go/trinary"
-	cuckoo "github.com/seiflotfy/cuckoofilter"
 	"github.com/tecbot/gorocksdb"
 )
 
@@ -45,15 +43,15 @@ var lsStateFileName = flag.String("ls-state-file", "./mainnet.snapshot.state", "
 var lsMetaFileName = flag.String("ls-meta-file", "./mainnet.snapshot.meta", "the name of the file containing the local snapshot meta data")
 
 // export
-const expFileVersion byte = 3
+const expFileVersion byte = 4
 
-var genLSAddrExpFile = flag.Bool("export-db", false, "if enabled, exports all data from a local-snapshot/spent-addresses database into single gzip compressed file")
-var expFileName = flag.String("export-db-file", "export.gz.bin", "the name of the gzip compressed file containing the exported database data")
+var genLSAddrExpFile = flag.Bool("export-db", false, "if enabled, exports all data from a local-snapshot/spent-addresses database into single binary file")
+var expFileName = flag.String("export-db-file", "export.bin", "the name of the binary file containing the exported database data")
 var printExpDbFileInfo = flag.Bool("export-db-file-info", false, "if enabled, simply prints the specified export file info to the console")
-var spentAddrCuckooFilterCapacity = flag.Int("cuckoo-filter-capacity", 50000000, "the capacity of the cuckoo filter 'containing' the spent addresses")
+var expOmitSpentAddrs = flag.Bool("omit-spent-addresses", false, "whether to omit exporting spent addresses")
 
 // export spent address
-var genAddrExpFile = flag.Bool("export-spent-addr", false, "if enabled, exports all spent addresses from a local-snapshot/spent-addresses database database into single gzip compressed file")
+var genAddrExpFile = flag.Bool("export-spent-addr", false, "if enabled, exports all spent addresses from a local-snapshot/spent-addresses database database into single binary file")
 var addrExpFileName = flag.String("export-spent-addr-file", "spent_addresses.bin", "the name of the file containing the exported spent addresses")
 
 // merge spent addresses sources
@@ -194,14 +192,12 @@ func mergeSpentAddressesSources() {
 func printExportFileInfo() {
 	file, err := os.OpenFile(*expFileName, os.O_RDONLY, 0666)
 	must(err)
-
-	gzipReader, err := gzip.NewReader(file)
-	must(err)
+	defer file.Close()
 
 	var bytesRead int
 
 	var fileVersion byte
-	must(binary.Read(gzipReader, binary.LittleEndian, &fileVersion))
+	must(binary.Read(file, binary.LittleEndian, &fileVersion))
 
 	if fileVersion != expFileVersion {
 		panic(fmt.Sprintf("file version %d is not supported, only version %d", fileVersion, expFileVersion))
@@ -215,7 +211,7 @@ func printExportFileInfo() {
 
 	// read in milestone hash
 	hashBuf := make([]byte, 49)
-	_, err = gzipReader.Read(hashBuf)
+	_, err = file.Read(hashBuf)
 	must(err)
 	bytesRead += 49
 
@@ -223,12 +219,12 @@ func printExportFileInfo() {
 	must(err)
 	ls.msHash = lsMsHash[:81]
 	var solidEntryPointsCount, seenMilestonesCount, ledgerEntriesCount, spentAddrsCount int32
-	must(binary.Read(gzipReader, binary.LittleEndian, &ls.msIndex))
-	must(binary.Read(gzipReader, binary.LittleEndian, &ls.msTimestamp))
-	must(binary.Read(gzipReader, binary.LittleEndian, &solidEntryPointsCount))
-	must(binary.Read(gzipReader, binary.LittleEndian, &seenMilestonesCount))
-	must(binary.Read(gzipReader, binary.LittleEndian, &ledgerEntriesCount))
-	must(binary.Read(gzipReader, binary.LittleEndian, &spentAddrsCount))
+	must(binary.Read(file, binary.LittleEndian, &ls.msIndex))
+	must(binary.Read(file, binary.LittleEndian, &ls.msTimestamp))
+	must(binary.Read(file, binary.LittleEndian, &solidEntryPointsCount))
+	must(binary.Read(file, binary.LittleEndian, &seenMilestonesCount))
+	must(binary.Read(file, binary.LittleEndian, &ledgerEntriesCount))
+	must(binary.Read(file, binary.LittleEndian, &spentAddrsCount))
 
 	// counters
 	bytesRead += 28
@@ -240,8 +236,8 @@ func printExportFileInfo() {
 
 	for i := 0; i < int(solidEntryPointsCount); i++ {
 		var val int32
-		must(binary.Read(gzipReader, binary.LittleEndian, hashBuf))
-		must(binary.Read(gzipReader, binary.LittleEndian, &val))
+		must(binary.Read(file, binary.LittleEndian, hashBuf))
+		must(binary.Read(file, binary.LittleEndian, &val))
 		hash, err := trinary.BytesToTrytes(hashBuf)
 		must(err)
 		ls.solidEntryPoints[hash[:81]] = val
@@ -249,8 +245,8 @@ func printExportFileInfo() {
 
 	for i := 0; i < int(seenMilestonesCount); i++ {
 		var val int32
-		must(binary.Read(gzipReader, binary.LittleEndian, hashBuf))
-		must(binary.Read(gzipReader, binary.LittleEndian, &val))
+		must(binary.Read(file, binary.LittleEndian, hashBuf))
+		must(binary.Read(file, binary.LittleEndian, &val))
 		hash, err := trinary.BytesToTrytes(hashBuf)
 		must(err)
 		ls.seenMilestones[hash[:81]] = val
@@ -258,48 +254,36 @@ func printExportFileInfo() {
 
 	for i := 0; i < int(ledgerEntriesCount); i++ {
 		var val uint64
-		must(binary.Read(gzipReader, binary.LittleEndian, hashBuf))
-		must(binary.Read(gzipReader, binary.LittleEndian, &val))
+		must(binary.Read(file, binary.LittleEndian, hashBuf))
+		must(binary.Read(file, binary.LittleEndian, &val))
 		hash, err := trinary.BytesToTrytes(hashBuf)
 		must(err)
 		ls.ledgerState[hash[:81]] = val
 	}
 
-	var cuckooFilterSize int32
-	must(binary.Read(gzipReader, binary.LittleEndian, &cuckooFilterSize))
-	bytesRead += int(cuckooFilterSize)
+	for i := 0; i < int(spentAddrsCount); i++ {
+		must(binary.Read(file, binary.LittleEndian, hashBuf))
+	}
 
 	fmt.Println("file version:", fileVersion)
 	fmt.Println("read following local snapshot from the exported database file:")
 	printLocalSnapshotFilesInfo(ls)
-	fmt.Printf("spent addresses cuckoo filter size: %d KBs\n", cuckooFilterSize/1024)
+	fmt.Printf("contains %d spent addresses\n", spentAddrsCount)
 
-	cuckooFilterData := make([]byte, cuckooFilterSize)
-	must(binary.Read(gzipReader, binary.LittleEndian, &cuckooFilterData))
-	cuckooFilter, err := cuckoo.Decode(cuckooFilterData)
-	if err != nil {
-		panic("couldn't reconstruct the cuckoo filter from the data within the snapshot file")
-	}
-	if int32(cuckooFilter.Count()) != spentAddrsCount {
-		panic(fmt.Sprintf("spent addresses count between the cuckoo filter (%d) and the header (%d) doesn't match", cuckooFilter.Count(), spentAddrsCount))
-	}
-	fmt.Printf("contains %d spent addresses in the cuckoo filter\n", spentAddrsCount)
 	fmt.Printf("read a total of %d KBs\n", bytesRead/1024)
-
 	hashInFile := make([]byte, 32)
-	must(binary.Read(gzipReader, binary.LittleEndian, hashInFile))
+	must(binary.Read(file, binary.LittleEndian, hashInFile))
 
 	// read in sha256 hash
-	must(gzipReader.Close())
 	_, err = file.Seek(0, 0)
 	must(err)
-	must(gzipReader.Reset(file))
 
 	// re read file to compute sha256 hash
-	fBytes, err := ioutil.ReadAll(gzipReader)
+	fBytes, err := ioutil.ReadAll(file)
 	if err != nil {
 		panic(err)
 	}
+
 	// trim file hash
 	fBytes = fBytes[:len(fBytes)-32]
 	computedHash := sha256.Sum256(fBytes)
@@ -376,22 +360,21 @@ func generateExportFile() {
 	fmt.Println("read following local snapshot from the database:")
 	printLocalSnapshotFilesInfo(ls)
 
-	fmt.Println("reading in spent addresses...")
 	spentAddrs := make([][]byte, 0)
-	saIt := db.NewIteratorCF(ro, cfs[1])
-	saIt.SeekToFirst()
-	for saIt = saIt; saIt.Valid(); saIt.Next() {
-		keyCopy := make([]byte, len(saIt.Key().Data()))
-		copy(keyCopy, saIt.Key().Data())
-		spentAddrs = append(spentAddrs, keyCopy)
-		saIt.Key().Free()
-		saIt.Value().Free()
-	}
-	fmt.Printf("read %d spent addresses\n", len(spentAddrs))
-
-	if len(spentAddrs) > *spentAddrCuckooFilterCapacity {
-		panic(fmt.Sprintf("the capacity of the cuckoo filter is too low to contain the spent addresses: "+
-			"spent addresses %d vs. CF capacity %d", len(spentAddrs), *spentAddrCuckooFilterCapacity))
+	if *expOmitSpentAddrs {
+		fmt.Println("omitting spent addresses in export file")
+	} else {
+		fmt.Println("reading in spent addresses...")
+		saIt := db.NewIteratorCF(ro, cfs[1])
+		saIt.SeekToFirst()
+		for saIt = saIt; saIt.Valid(); saIt.Next() {
+			keyCopy := make([]byte, len(saIt.Key().Data()))
+			copy(keyCopy, saIt.Key().Data())
+			spentAddrs = append(spentAddrs, keyCopy)
+			saIt.Key().Free()
+			saIt.Value().Free()
+		}
+		fmt.Printf("read %d spent addresses\n", len(spentAddrs))
 	}
 
 	fmt.Println("writing in-memory binary buffer")
@@ -425,25 +408,13 @@ func generateExportFile() {
 		must(binary.Write(&buf, binary.LittleEndian, raw))
 		must(binary.Write(&buf, binary.LittleEndian, v))
 	}
-
-	cuckooFilter := cuckoo.NewFilter(uint(*spentAddrCuckooFilterCapacity))
-	var failedToInsert int
-	for i, v := range spentAddrs {
-		if inserted := cuckooFilter.Insert(v); !inserted {
-			failedToInsert++
-		}
-		fmt.Printf("populating cuckoo filter: %d/%d (failed to insert: %d)\t\r", i+1, len(spentAddrs), failedToInsert)
+	for _, v := range spentAddrs {
+		must(binary.Write(&buf, binary.LittleEndian, v))
 	}
-	fmt.Println()
-
-	serializedCuckooFilter := cuckooFilter.Encode()
-	// write the size of the cuckoo filter into the file for easier retrieval
-	must(binary.Write(&buf, binary.LittleEndian, int32(len(serializedCuckooFilter))))
-	fmt.Printf("spent addresses cuckoo filter size: %d KBs\n", len(serializedCuckooFilter)/1024)
-	must(binary.Write(&buf, binary.LittleEndian, serializedCuckooFilter))
 
 	fmt.Printf("wrote in-memory binary buffer (%d KBs)\n", buf.Len()/1024)
-	fmt.Printf("writing gzipped stream to file %s\n", *expFileName)
+	fmt.Printf("writing binary stream to file %s\n", *expFileName)
+
 	os.Remove(*expFileName)
 	exportFile, err := os.OpenFile(*expFileName, os.O_WRONLY|os.O_CREATE, 0660)
 	must(err)
@@ -451,13 +422,10 @@ func generateExportFile() {
 	sha256Hash := sha256.Sum256(buf.Bytes())
 	must(binary.Write(&buf, binary.LittleEndian, sha256Hash))
 
-	gzipWriter := gzip.NewWriter(exportFile)
-	readBuf := bytes.NewBuffer(buf.Bytes())
-	_, err = io.Copy(gzipWriter, readBuf)
+	_, err = io.Copy(exportFile, bytes.NewBuffer(buf.Bytes()))
 	must(err)
 
 	// clean up
-	must(gzipWriter.Close())
 	must(exportFile.Close())
 
 	fmt.Printf("sha256: %x\n", sha256Hash)
