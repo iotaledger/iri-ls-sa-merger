@@ -233,6 +233,7 @@ func printExportFileInfo() {
 	bytesRead += int(solidEntryPointsCount) * (49 + 4)
 	bytesRead += int(seenMilestonesCount) * (49 + 4)
 	bytesRead += int(ledgerEntriesCount) * (49 + 8)
+	bytesRead += int(spentAddrsCount) * (49)
 
 	for i := 0; i < int(solidEntryPointsCount); i++ {
 		var val int32

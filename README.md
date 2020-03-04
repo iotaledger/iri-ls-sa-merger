@@ -90,7 +90,11 @@ Using `./iri-ls-sa-merger -export-db` yields a gzip compressed binary `export.gz
 ledger state and spent-addresses out of a `localsnapshots-db`. This can be useful for other applications which are reliant on having
 the given data in a simple format. You must use different version of the program to read/write different export file versions.
 
-**Note that file format v1 and v2 use big endianness, while v3 uses little endianness.**
+Starting with v4, `./iri-ls-sa-merger -export-db` yields a non-gzipped binary `export.bin` which may not contain any spent addresses
+if it was generated using the `-omit-spent-addresses` flag. v4 uses little endianess and no gzip compression.
+Using the spent addresses count within the export file allows the importing program to behave accordingly.
+
+**Note that file format v1 and v2 use big endianness, while v3 and 4 uses little endianness.**
 
 <details>
   <summary>File format v1</summary>
@@ -221,6 +225,73 @@ the given data in a simple format. You must use different version of the program
   
 </details>
 
+<details>
+  <summary>File format v4</summary>
+  
+  **Note that v4 uses little endianness and NO gzip compression.**
+  
+  File format:
+  ```
+  versionByte -> 1 byte
+  milestoneHash -> 49 bytes
+  milestoneIndex -> int32
+  snapshotTimestamp -> int64
+  amountOfSolidEntryPoints -> int32
+  amountOfSeenMilestones -> int32
+  amountOfBalances -> int32
+  amountOfSpentAddresses -> int32
+  amountOfSolidEntryPoints * solidEntryPointHash:index -> 49 bytes + int32
+  amountOfSeenMilestones * seenMilestoneHash:index -> 49 bytes + int32
+  amountOfBalances * balance:value -> 49 bytes + int64
+  amountOfSpentAddresses * spentAddress -> 49 bytes
+  sha256 hash of the data above -> 32 bytes
+  ```
+  
+  ```
+  $ ./iri-ls-sa-merger -export-db
+  >> IRI Localsnapshot & SpentAddresses Merger & Exporter v4 <<
+  [generate local-snapshot+spent-addresses export file from database mode]
+  persisted local snapshot is 23488 KBs in size
+  read following local snapshot from the database:
+  ms index/hash/timestamp: 1341595/XONTRMOEWOURIYMKJKGN9ZUZYNVOOIMEMKJQUJZR9KYSGGFIQBWFJ9KZCCUZAZSKTUUSOMLQHRMDA9999/1581519550
+  solid entry points: 1007
+  seen milestones: 102
+  ledger entries: 420942
+  max supply correct: true
+  size: 23488 KBs
+  reading in spent addresses...
+  read 13229614 spent addresses
+  writing in-memory binary buffer
+  wrote in-memory binary buffer (656546 KBs)
+  writing binary stream to file export.bin
+  sha256: d50d51927dffe40546597be4d4a7301a60bd62678d6d04b606d7f73e843c05bb
+  finished, took 17.9144306s
+  ```
+
+  If the tool is ran with `-omit-spent-addresses` no spent addresses are written to the export file.
+  
+  ```
+  ./iri-ls-sa-merger -export-db -omit-spent-addresses -export-db-file=export.nospentaddr.bin
+  >> IRI Localsnapshot & SpentAddresses Merger & Exporter v4 <<
+  [generate local-snapshot+spent-addresses export file from database mode]
+  persisted local snapshot is 23488 KBs in size
+  read following local snapshot from the database:
+  ms index/hash/timestamp: 1341595/XONTRMOEWOURIYMKJKGN9ZUZYNVOOIMEMKJQUJZR9KYSGGFIQBWFJ9KZCCUZAZSKTUUSOMLQHRMDA9999/1581519550
+  solid entry points: 1007
+  seen milestones: 102
+  ledger entries: 420942
+  max supply correct: true
+  size: 23488 KBs
+  omitting spent addresses in export file
+  writing in-memory binary buffer
+  wrote in-memory binary buffer (23488 KBs)
+  writing binary stream to file export.nospentaddr.bin
+  sha256: 991aaa62417e14e6aa947aaf23cd217ca9eb2e6f6c070463c37ab2ca571c803c
+  finished, took 2.6531701s
+  ```  
+  
+</details>
+
 Note that there are **no** delimiters between the values (there's no `:`), so use the above byte size notation to simply parse
 the values accordingly. You can use the verification method's source code to understand on how to write a function
 reading in such file.
@@ -306,5 +377,26 @@ Using `./iri-ls-sa-merger -export-db-file-info` yields information about the exp
   contains 12995577 spent addresses in the cuckoo filter
   read a total of 88331 KBs
   data integrity check successful (sha256): a3290e48b6432257e8fb67c1f2540c97b1c54afacc1983ed684d6b4fb011416f
+  ```
+</details>
+
+<details>
+  <summary>File format v4</summary>
+  
+  ```
+  ./iri-ls-sa-merger -export-db-file-info
+  >> IRI Localsnapshot & SpentAddresses Merger & Exporter v4 <<
+  [print export file info mode]
+  file version: 4
+  read following local snapshot from the exported database file:
+  ms index/hash/timestamp: 1341595/XONTRMOEWOURIYMKJKGN9ZUZYNVOOIMEMKJQUJZR9KYSGGFIQBWFJ9KZCCUZAZSKTUUSOMLQHRMDA9999/1581519550
+  solid entry points: 1007
+  seen milestones: 102
+  ledger entries: 420942
+  max supply correct: true
+  size: 23488 KBs
+  contains 13229614 spent addresses
+  read a total of 656546 KBs
+  data integrity check successful (sha256): d50d51927dffe40546597be4d4a7301a60bd62678d6d04b606d7f73e843c05bb
   ```
 </details>
