@@ -1,5 +1,5 @@
 
-FROM ubuntu:19.04
+FROM ubuntu:19.10
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgflags-dev libsnappy-dev zlib1g-dev libbz2-dev libzstd-dev liblz4-dev \
@@ -18,7 +18,7 @@ RUN mkdir -p "$GOPATH/src" "$GOPATH/bin" && chmod -R 777 "$GOPATH"
 
 # Installing iri-ls-sa-merger
 RUN git clone -b 5.17.fb https://github.com/facebook/rocksdb
-RUN cd rocksdb && make shared_lib && make install-shared
+RUN cd rocksdb && make -j 5 DISABLE_WARNING_AS_ERROR=true shared_lib && make -j 5 DISABLE_WARNING_AS_ERROR=true install-shared
 
 ENV LD_LIBRARY_PATH=/usr/local/lib
 
